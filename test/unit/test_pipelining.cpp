@@ -2203,25 +2203,44 @@ struct parallel_exception_test_exception {
 template <typename dest_t>
 struct exception_thrower : public node {
 	dest_t dest;
-	exception_thrower(dest_t dest) : dest(std::move(dest)) {}
+	int where;
+	exception_thrower(dest_t dest, int where) : dest(std::move(dest)), where(where) {}
 
-	void go() override {
-		dest.push(1);
-		throw parallel_exception_test_exception();
-	}
+#define TPIE_TEST_THROW(func, i) void func() override { if (where == i) throw parallel_exception_test_exception(); }
+	TPIE_TEST_THROW(prepare, 0);
+	TPIE_TEST_THROW(propagate, 1);
+	TPIE_TEST_THROW(begin, 2);
+	TPIE_TEST_THROW(go, 3);
+	TPIE_TEST_THROW(end, 4);
+#undef TPIE_TEST_THROW
+
+void push(int) {};
 };
 
-bool parallel_exception_test() {
-	pipeline p = make_pipe_begin<exception_thrower>()
-		| parallel(splitter())
-		| null_sink<int>();
+struct foo : public node {};
 
-	try {
-		p();
-	} catch(parallel_exception_test_exception) {
-		return true;
+bool parallel_exception_test() {
+	int successes = 0;
+
+	for (int i = 0; i < 5; i++) {
+		pipeline p_ = make_pipe_begin<exception_thrower>(4)
+			| parallel(splitter())
+			| null_sink<int>();
+
+		pipeline p = input_vector(inputvector)
+			| parallel(splitter())
+			| make_pipe_end<exception_thrower<int>>(1, 3);
+
+		try {
+			p();
+		} catch (parallel_exception_test_exception) {
+			successes++;
+		}
 	}
 
+	log_debug() << successes << std::endl;
+
+	return successes == 3;
 	return false;
 }
 
@@ -2274,6 +2293,6 @@ int main(int argc, char ** argv) {
 	.test(join_split_dealloc_test, "join_split_dealloc")
 	.test(nodeset_dealloc_test, "nodeset_dealloc")
 	.test(pipeline_dealloc_test, "pipeline_dealloc")
-	//.test(parallel_exception_test, "parallel_exception")
+	.test(parallel_exception_test, "parallel_exception")
 	;
 }
